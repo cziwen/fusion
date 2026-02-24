@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../game.dart';
+import '../components/mixins/magnetic_effect_mixin.dart';
 
 class DebugPanel extends StatefulWidget {
   final FusionGame game;
@@ -191,6 +192,19 @@ class _DebugPanelState extends State<DebugPanel> {
                         },
                       ),
                       const SizedBox(height: 8),
+                      _buildDropdown<AttractionStyle>(
+                        label: 'Gravity Style',
+                        value: player.attractionStyle,
+                        items: AttractionStyle.values,
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() {
+                              player.attractionStyle = val;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 8),
                       _buildSlider(
                         label: 'Pulse Duration: ${player.pulseDuration.toStringAsFixed(2)}s',
                         value: player.pulseDuration,
@@ -306,6 +320,43 @@ class _DebugPanelState extends State<DebugPanel> {
         Text(
           label,
           style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDropdown<T extends Enum>({
+    required String label,
+    required T value,
+    required List<T> items,
+    required ValueChanged<T?> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+        const SizedBox(height: 4),
+        Theme(
+          data: Theme.of(context).copyWith(
+            canvasColor: Colors.grey[900],
+          ),
+          child: DropdownButton<T>(
+            value: value,
+            isDense: true,
+            isExpanded: true,
+            underline: Container(height: 1, color: Colors.white24),
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            items: items.map((T item) {
+              return DropdownMenuItem<T>(
+                value: item,
+                child: Text(item.name),
+              );
+            }).toList(),
+            onChanged: onChanged,
+          ),
         ),
       ],
     );

@@ -33,6 +33,7 @@ class Player extends RectangleComponent
   bool showAttractionLines = true;
   bool showImpactPulses = true;
   double pulseDuration = 0.4;
+  AttractionStyle attractionStyle = AttractionStyle.streaks;
 
   final List<AttractionTarget> _activeAttractionTargets = [];
 
@@ -74,7 +75,13 @@ class Player extends RectangleComponent
     super.render(canvas);
     if (showAttractionLines) {
       for (final target in _activeAttractionTargets) {
-        drawAttractionLine(canvas, target.source, target.target, target.strength);
+        drawAttractionEffect(
+          canvas,
+          target.source,
+          target.target,
+          target.strength,
+          style: attractionStyle,
+        );
       }
     }
     if (showImpactPulses) {
