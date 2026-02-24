@@ -162,7 +162,11 @@ class Player extends RectangleComponent
     square.position = targetWorldPos;
     // Queue the local position and angle for when it mounts to the Player.
     square.pendingLocalPosition = finalLocalPos;
-    square.pendingLocalAngle = 0;
+    
+    // Snapping to the nearest local 90-degree increment.
+    final localAngle = square.angle - angle;
+    final snappedLocalAngle = (localAngle / (math.pi / 2)).round() * (math.pi / 2);
+    square.pendingLocalAngle = snappedLocalAngle;
 
     square.removeFromParent();
     add(square);
@@ -445,8 +449,12 @@ class Player extends RectangleComponent
     _tempVec1.scale(1.0 / distance); 
     square.position.addScaled(_tempVec1, strength * attractionForce * dt);
 
-    // Smoothly rotate the square to align with the Player's orientation.
-    final angleDiff = angle - square.angle;
+    // Smoothly rotate the square to align with the nearest 90-degree face of the Player.
+    final relAngle = square.angle - angle;
+    final targetRelAngle = (relAngle / (math.pi / 2)).round() * (math.pi / 2);
+    final targetWorldAngle = angle + targetRelAngle;
+
+    final angleDiff = targetWorldAngle - square.angle;
     final normalizedDiff = (angleDiff + math.pi) % (2 * math.pi) - math.pi;
     square.angle += normalizedDiff * (strength * 5.0) * dt;
 
