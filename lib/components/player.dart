@@ -2,16 +2,13 @@ import 'dart:math' as math;
 
 import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import '../game.dart';
 import 'collectable_square.dart';
 import 'mixins/magnetic_effect_mixin.dart';
 
 class Player extends RectangleComponent
-    with HasGameReference<FusionGame>, KeyboardHandler, CollisionCallbacks, MagneticEffectMixin {
-  static const double speed = 200.0;
-  static const double rotationSpeed = 3.0;
+    with HasGameReference<FusionGame>, CollisionCallbacks, MagneticEffectMixin {
   static const double cellSize = 20.0;
   double attractionRadius = 150.0;
   double attractionForce = 500.0;
@@ -22,9 +19,8 @@ class Player extends RectangleComponent
   static const double lockTimeoutSeconds = 1.2;
   static const double snapDistance = 6.0;
 
-  Vector2 velocity = Vector2.zero();
-  final Set<LogicalKeyboardKey> _keysPressed = {};
   final Set<(int, int)> _occupiedCells = {(0, 0)};
+  final Map<(int, int), CollectableSquare> _attachedSquares = {}; // 新增：用于快速查找已挂载方块
   final Map<(int, int), CollectableSquare> _reservedCells = {};
   final List<CollectableSquare> _magnetCandidates = [];
   final Map<(int, int), Vector2> _cellLocalPositionCache = {};
@@ -42,6 +38,14 @@ class Player extends RectangleComponent
   AttractionStyle attractionStyle = AttractionStyle.streaks;
 
   final List<AttractionTarget> _activeAttractionTargets = [];
+  final Paint _controlRingPaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.35)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.5;
+  final Paint _controlTickPaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.55)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.0;
 
   Player()
       : super(
@@ -51,6 +55,10 @@ class Player extends RectangleComponent
     add(RectangleHitbox());
   }
 
+  // Keep control zone radius fully aligned with attraction radius.
+  double get controlRadius => attractionRadius;
+  set controlRadius(double value) => attractionRadius = value;
+
   @override
   void update(double dt) {
     super.update(dt);
@@ -58,31 +66,8 @@ class Player extends RectangleComponent
     _activeAttractionTargets.clear();
     updatePulses(dt);
 
-    // Movement logic.
-    velocity.x = 0;
-    velocity.y = 0;
-
-    if (_keysPressed.contains(LogicalKeyboardKey.keyW) || _keysPressed.contains(LogicalKeyboardKey.arrowUp)) velocity.y -= 1;
-    if (_keysPressed.contains(LogicalKeyboardKey.keyS) || _keysPressed.contains(LogicalKeyboardKey.arrowDown)) velocity.y += 1;
-    if (_keysPressed.contains(LogicalKeyboardKey.keyA) || _keysPressed.contains(LogicalKeyboardKey.arrowLeft)) velocity.x -= 1;
-    if (_keysPressed.contains(LogicalKeyboardKey.keyD) || _keysPressed.contains(LogicalKeyboardKey.arrowRight)) velocity.x += 1;
-
-    if (!velocity.isZero()) {
-      velocity.normalize();
-      position += velocity * speed * dt;
-    }
-
-    // Rotation logic.
-    double rotationDir = 0;
-    if (_keysPressed.contains(LogicalKeyboardKey.keyQ) || _keysPressed.contains(LogicalKeyboardKey.comma)) {
-      rotationDir -= 1;
-    }
-    if (_keysPressed.contains(LogicalKeyboardKey.keyE) || _keysPressed.contains(LogicalKeyboardKey.period)) {
-      rotationDir += 1;
-    }
-    if (rotationDir != 0) {
-      angle += rotationDir * rotationSpeed * dt;
-    }
+    // 同步玩家角度，使其在屏幕上保持正向
+    angle = game.worldRotation;
 
     _refreshMagnetCandidates(dt);
     _updateMagnetismBatch(dt);
@@ -90,6 +75,7 @@ class Player extends RectangleComponent
 
   @override
   void render(Canvas canvas) {
+    _renderControlZone(canvas);
     super.render(canvas);
     if (showAttractionLines) {
       for (final target in _activeAttractionTargets) {
@@ -107,6 +93,21 @@ class Player extends RectangleComponent
     }
   }
 
+  void _renderControlZone(Canvas canvas) {
+    final center = Offset(size.x / 2, size.y / 2);
+    canvas.drawCircle(center, controlRadius, _controlRingPaint);
+
+    const tickCount = 4;
+    const tickLength = 10.0;
+    for (var i = 0; i < tickCount; i++) {
+      final angle = (math.pi / 2) * i;
+      final dir = Vector2(math.cos(angle), math.sin(angle));
+      final inner = center + Offset(dir.x * (controlRadius - tickLength), dir.y * (controlRadius - tickLength));
+      final outer = center + Offset(dir.x * controlRadius, dir.y * controlRadius);
+      canvas.drawLine(inner, outer, _controlTickPaint);
+    }
+  }
+
   @override
   void onCollisionStart(
     Set<Vector2> intersectionPoints,
@@ -116,16 +117,6 @@ class Player extends RectangleComponent
     if (other is CollectableSquare && !other.isAttached) {
       requestAttach(other);
     }
-  }
-
-  @override
-  bool onKeyEvent(KeyEvent event, Set<LogicalKeyboardKey> keysPressed) {
-    if (event is KeyDownEvent) {
-      _keysPressed.add(event.logicalKey);
-    } else if (event is KeyUpEvent) {
-      _keysPressed.remove(event.logicalKey);
-    }
-    return true;
   }
 
   void requestAttach(CollectableSquare square) {
@@ -172,6 +163,7 @@ class Player extends RectangleComponent
     add(square);
 
     _occupiedCells.add(targetCell);
+    _attachedSquares[targetCell] = square;
 
     // Trigger impact pulse for each shared edge with an occupied cell.
     for (final neighbor in _neighbors(targetCell)) {
@@ -196,6 +188,11 @@ class Player extends RectangleComponent
 
     // Notify game to stop tracking this square in chunks
     game.onSquareAttached(square);
+    game.triggerCameraShake();
+
+    // 检查消除和连通性
+    _checkMatches();
+    _checkConnectivity();
   }
 
   (int, int)? _findNearestAttachCell(Vector2 worldPos, {CollectableSquare? requester}) {
@@ -405,6 +402,21 @@ class Player extends RectangleComponent
     );
   }
 
+  bool hasAttachedSquareOutsideControlZone() {
+    final localCenter = Vector2(size.x / 2, size.y / 2);
+    final halfDiagonal = math.sqrt(2) * (cellSize / 2);
+    final limit = controlRadius - halfDiagonal;
+
+    for (final cell in _attachedSquares.keys) {
+      final localPos = _cellToLocal(cell);
+      final distance = localPos.distanceTo(localCenter);
+      if (distance > limit) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _processMagnetismForSquare(CollectableSquare square, double dt) {
     if (square.isAttached) {
       _releaseReservation(square);
@@ -444,6 +456,31 @@ class Player extends RectangleComponent
 
     final distance = math.sqrt(distanceSquared);
     final strength = 1.0 - (distance / attractionRadius);
+
+    // 控制环逻辑：进入 controlRadius 后，强制方块的角度位置与玩家网格对齐
+    if (distance <= controlRadius) {
+      // 计算方块相对于玩家的当前世界角度
+      final currentAngle = math.atan2(
+        square.absolutePosition.y - absolutePosition.y,
+        square.absolutePosition.x - absolutePosition.x,
+      );
+
+      // 玩家当前的旋转（即网格的基准角度）
+      final baseAngle = angle;
+      
+      // 找到最接近的 90 度倍数
+      final relAngle = currentAngle - baseAngle;
+      final targetRelAngle = (relAngle / (math.pi / 2)).round() * (math.pi / 2);
+      final targetAngle = baseAngle + targetRelAngle;
+
+      // 平滑或强制同步角度位置
+      // 我们通过重新计算 position 来实现角位置同步
+      final newPos = absolutePosition + 
+          Vector2(math.cos(targetAngle), math.sin(targetAngle)) * distance;
+      
+      // 平滑过渡到对齐位置
+      square.position.lerp(newPos, 10.0 * dt);
+    }
     
     // direction = _tempVec1 / distance
     _tempVec1.scale(1.0 / distance); 
@@ -483,5 +520,121 @@ class Player extends RectangleComponent
       cell,
       () => Vector2(cell.$1 * cellSize + cellSize / 2, cell.$2 * cellSize + cellSize / 2),
     );
+  }
+
+  void _checkMatches() {
+    final toRemove = <(int, int)>{};
+
+    // 1. Check Match 5 (Horizontal and Vertical)
+    for (final cell in _attachedSquares.keys) {
+      // Horizontal
+      var horizontalMatch = <(int, int)>{cell};
+      for (int i = 1; i < 5; i++) {
+        final nextCell = (cell.$1 + i, cell.$2);
+        if (_attachedSquares.containsKey(nextCell)) {
+          horizontalMatch.add(nextCell);
+        } else {
+          break;
+        }
+      }
+      if (horizontalMatch.length >= 5) toRemove.addAll(horizontalMatch);
+
+      // Vertical
+      var verticalMatch = <(int, int)>{cell};
+      for (int i = 1; i < 5; i++) {
+        final nextCell = (cell.$1, cell.$2 + i);
+        if (_attachedSquares.containsKey(nextCell)) {
+          verticalMatch.add(nextCell);
+        } else {
+          break;
+        }
+      }
+      if (verticalMatch.length >= 5) toRemove.addAll(verticalMatch);
+    }
+
+    // 2. Check Pyramid 6 (1-2-3 structure)
+    // 我们定义 8 种可能的楼梯状金字塔（4个旋转 * 2个镜像）
+    final pyramidOffsets = [
+      // Right-bottom staircase
+      [(0,0), (1,0), (2,0), (0,1), (1,1), (0,2)],
+      [(0,0), (-1,0), (-2,0), (0,1), (-1,1), (0,2)],
+      [(0,0), (1,0), (2,0), (0,-1), (1,-1), (0,-2)],
+      [(0,0), (-1,0), (-2,0), (0,-1), (-1,-1), (0,-2)],
+      // Right-top staircase
+      [(0,0), (0,1), (0,2), (1,0), (1,1), (2,0)],
+      [(0,0), (0,-1), (0,-2), (1,0), (1,-1), (2,0)],
+      [(0,0), (0,1), (0,2), (-1,0), (-1,1), (-2,0)],
+      [(0,0), (0,-1), (0,-2), (-1,0), (-1,-1), (-2,0)],
+    ];
+
+    for (final cell in _attachedSquares.keys) {
+      for (final offsets in pyramidOffsets) {
+        bool match = true;
+        final currentPyramid = <(int, int)>{};
+        for (final offset in offsets) {
+          final target = (cell.$1 + offset.$1, cell.$2 + offset.$2);
+          if (!_attachedSquares.containsKey(target)) {
+            match = false;
+            break;
+          }
+          currentPyramid.add(target);
+        }
+        if (match) {
+          toRemove.addAll(currentPyramid);
+        }
+      }
+    }
+
+    if (toRemove.isNotEmpty) {
+      for (final cell in toRemove) {
+        final square = _attachedSquares.remove(cell);
+        _occupiedCells.remove(cell);
+        square?.removeFromParent();
+      }
+      _topologyVersion++;
+    }
+  }
+
+  void _checkConnectivity() {
+    if (_occupiedCells.isEmpty) return;
+
+    final connected = <(int, int)>{};
+    final queue = <(int, int)>[(0, 0)];
+    connected.add((0, 0));
+
+    while (queue.isNotEmpty) {
+      final current = queue.removeAt(0);
+      for (final neighbor in _neighbors(current)) {
+        if (_occupiedCells.contains(neighbor) && !connected.contains(neighbor)) {
+          connected.add(neighbor);
+          queue.add(neighbor);
+        }
+      }
+    }
+
+    final orphans = <(int, int)>{};
+    for (final cell in _occupiedCells) {
+      if (!connected.contains(cell)) {
+        orphans.add(cell);
+      }
+    }
+
+    if (orphans.isNotEmpty) {
+      for (final cell in orphans) {
+        final square = _attachedSquares.remove(cell);
+        _occupiedCells.remove(cell);
+        if (square != null) {
+          // 将孤立方块释放回世界
+          square.isAttached = false;
+          square.magnetState = MagnetState.idle;
+          square.removeFromParent();
+          game.world.add(square);
+          game.onSquareDetached(square);
+          // 重新放回后，其位置需要转换为世界坐标
+          square.position = absolutePositionOf(_cellToLocal(cell));
+        }
+      }
+      _topologyVersion++;
+    }
   }
 }

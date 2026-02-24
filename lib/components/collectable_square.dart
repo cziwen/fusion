@@ -6,6 +6,7 @@ import 'player.dart';
 enum MagnetState { idle, attracted, attaching, attached }
 
 class CollectableSquare extends RectangleComponent with CollisionCallbacks {
+  Color color = Colors.white;
   bool isAttached = false;
   MagnetState magnetState = MagnetState.idle;
   (int, int)? lockedTargetCell;
@@ -15,11 +16,11 @@ class CollectableSquare extends RectangleComponent with CollisionCallbacks {
   Vector2? pendingLocalPosition;
   double? pendingLocalAngle;
 
-  CollectableSquare({super.position})
+  CollectableSquare({super.position, this.color = Colors.white})
       : super(
           size: Vector2.all(20),
           anchor: Anchor.center,
-          paint: Paint()..color = Colors.white,
+          paint: Paint()..color = color,
         ) {
     add(RectangleHitbox());
   }

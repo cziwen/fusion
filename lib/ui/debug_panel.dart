@@ -13,7 +13,8 @@ class DebugPanel extends StatefulWidget {
 class _DebugPanelState extends State<DebugPanel> {
   bool _isExpanded = false;
   bool _isMagnetismExpanded = false;
-  bool _isVisualExpanded = true;
+  bool _isVisualExpanded = false;
+  bool _isSpawnExpanded = false;
   bool _isCameraExpanded = false;
 
   @override
@@ -42,7 +43,7 @@ class _DebugPanelState extends State<DebugPanel> {
                 width: 250,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.8),
+                  color: Colors.black.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.white24),
                 ),
@@ -83,6 +84,18 @@ class _DebugPanelState extends State<DebugPanel> {
                         onChanged: (val) {
                           setState(() {
                             player.attractionRadius = val;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      _buildSlider(
+                        label: 'Control Radius: ${player.controlRadius.toStringAsFixed(0)}',
+                        value: player.controlRadius,
+                        min: 20,
+                        max: 300,
+                        onChanged: (val) {
+                          setState(() {
+                            player.controlRadius = val;
                           });
                         },
                       ),
@@ -144,6 +157,81 @@ class _DebugPanelState extends State<DebugPanel> {
                             player.visibleCandidateMargin = val;
                           });
                         },
+                      ),
+                      const SizedBox(height: 8),
+                      _buildSlider(
+                        label: 'Free Drift: ${widget.game.freeDriftSpeed.toStringAsFixed(1)}',
+                        value: widget.game.freeDriftSpeed,
+                        min: 0,
+                        max: 100,
+                        onChanged: (val) {
+                          setState(() {
+                            widget.game.freeDriftSpeed = val;
+                          });
+                        },
+                      ),
+                    ],
+                    const Divider(color: Colors.white24, height: 24),
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _isSpawnExpanded = !_isSpawnExpanded;
+                        });
+                      },
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Spawn Settings',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Icon(
+                            _isSpawnExpanded ? Icons.expand_less : Icons.expand_more,
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_isSpawnExpanded) ...[
+                      const SizedBox(height: 16),
+                      _buildSlider(
+                        label: 'Spawn Count: ${widget.game.spawnCountPerTick}',
+                        value: widget.game.spawnCountPerTick.toDouble(),
+                        min: 1,
+                        max: 20,
+                        divisions: 19,
+                        onChanged: (val) {
+                          setState(() {
+                            widget.game.spawnCountPerTick = val.round();
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      _buildSlider(
+                        label: 'Spawn Interval: ${widget.game.spawnIntervalSeconds.toStringAsFixed(2)}s',
+                        value: widget.game.spawnIntervalSeconds,
+                        min: 0.2,
+                        max: 5.0,
+                        onChanged: (val) {
+                          setState(() {
+                            widget.game.spawnIntervalSeconds = val;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: () {
+                            widget.game.spawnNow();
+                            setState(() {});
+                          },
+                          child: const Text('Spawn Now'),
+                        ),
                       ),
                     ],
                     const Divider(color: Colors.white24, height: 24),
