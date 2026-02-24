@@ -13,6 +13,7 @@ class CollectableSquare extends RectangleComponent with CollisionCallbacks {
   double lockElapsed = 0;
   bool attachRequestedThisFrame = false;
   Vector2? pendingLocalPosition;
+  double? pendingLocalAngle;
 
   CollectableSquare({super.position})
       : super(
@@ -29,6 +30,10 @@ class CollectableSquare extends RectangleComponent with CollisionCallbacks {
     if (pendingLocalPosition != null) {
       position.setFrom(pendingLocalPosition!);
       pendingLocalPosition = null;
+    }
+    if (pendingLocalAngle != null) {
+      angle = pendingLocalAngle!;
+      pendingLocalAngle = null;
     }
   }
 

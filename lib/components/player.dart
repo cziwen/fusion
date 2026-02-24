@@ -11,6 +11,7 @@ import 'mixins/magnetic_effect_mixin.dart';
 class Player extends RectangleComponent
     with HasGameReference<FusionGame>, KeyboardHandler, CollisionCallbacks, MagneticEffectMixin {
   static const double speed = 200.0;
+  static const double rotationSpeed = 3.0;
   static const double cellSize = 20.0;
   double attractionRadius = 150.0;
   double attractionForce = 500.0;
@@ -26,6 +27,11 @@ class Player extends RectangleComponent
   final Set<(int, int)> _occupiedCells = {(0, 0)};
   final Map<(int, int), CollectableSquare> _reservedCells = {};
   final List<CollectableSquare> _magnetCandidates = [];
+  final Map<(int, int), Vector2> _cellLocalPositionCache = {};
+  
+  // Reusable vectors for optimization to reduce GC pressure on Web.
+  final Vector2 _tempVec1 = Vector2.zero();
+  
   int _magnetBatchCursor = 0;
   double _candidateRefreshElapsed = 0;
   int _topologyVersion = 0;
@@ -64,6 +70,18 @@ class Player extends RectangleComponent
     if (!velocity.isZero()) {
       velocity.normalize();
       position += velocity * speed * dt;
+    }
+
+    // Rotation logic.
+    double rotationDir = 0;
+    if (_keysPressed.contains(LogicalKeyboardKey.keyQ) || _keysPressed.contains(LogicalKeyboardKey.comma)) {
+      rotationDir -= 1;
+    }
+    if (_keysPressed.contains(LogicalKeyboardKey.keyE) || _keysPressed.contains(LogicalKeyboardKey.period)) {
+      rotationDir += 1;
+    }
+    if (rotationDir != 0) {
+      angle += rotationDir * rotationSpeed * dt;
     }
 
     _refreshMagnetCandidates(dt);
@@ -131,8 +149,8 @@ class Player extends RectangleComponent
     }
     final finalLocalPos = _cellToLocal(targetCell);
     // Calculate the target world position to maintain visual continuity during the transition frame.
-    // Since Player's anchor is center, its top-left in world space is absolutePosition - size/2.
-    final targetWorldPos = absolutePosition - (size / 2) + finalLocalPos;
+    // Use absolutePositionOf to account for Player's current rotation and anchor.
+    final targetWorldPos = absolutePositionOf(finalLocalPos);
 
     _releaseReservation(square);
     square.isAttached = true;
@@ -142,8 +160,9 @@ class Player extends RectangleComponent
     // Temporarily set the world position so it doesn't jump during the remainder of this frame
     // while it is still technically a child of the World or in transition.
     square.position = targetWorldPos;
-    // Queue the local position for when it mounts to the Player.
+    // Queue the local position and angle for when it mounts to the Player.
     square.pendingLocalPosition = finalLocalPos;
+    square.pendingLocalAngle = 0;
 
     square.removeFromParent();
     add(square);
@@ -328,14 +347,13 @@ class Player extends RectangleComponent
     final candidates = _collectAttachCandidates();
     if (candidates.isEmpty) return null;
 
-    final worldTopLeft = absolutePosition - (size / 2);
     var minX = double.infinity;
     var minY = double.infinity;
     var maxX = -double.infinity;
     var maxY = -double.infinity;
 
     for (final cell in candidates) {
-      final worldCenter = worldTopLeft + _cellToLocal(cell);
+      final worldCenter = absolutePositionOf(_cellToLocal(cell));
       if (worldCenter.x < minX) minX = worldCenter.x;
       if (worldCenter.y < minY) minY = worldCenter.y;
       if (worldCenter.x > maxX) maxX = worldCenter.x;
@@ -400,10 +418,11 @@ class Player extends RectangleComponent
       return;
     }
 
-    // Calculate target world position relative to Player's top-left.
-    final targetWorld = absolutePosition - (size / 2) + _cellToLocal(targetCell);
-    final delta = targetWorld - square.absolutePosition;
-    final distanceSquared = delta.length2;
+    // Calculate target world position relative to Player's center, accounting for rotation.
+    final targetWorld = absolutePositionOf(_cellToLocal(targetCell));
+    _tempVec1.setFrom(targetWorld);
+    _tempVec1.sub(square.absolutePosition);
+    final distanceSquared = _tempVec1.length2;
     final maxAttractionDistanceSquared = attractionRadius * attractionRadius;
     if (distanceSquared > maxAttractionDistanceSquared) {
       _releaseReservation(square);
@@ -421,8 +440,15 @@ class Player extends RectangleComponent
 
     final distance = math.sqrt(distanceSquared);
     final strength = 1.0 - (distance / attractionRadius);
-    final direction = delta / distance;
-    square.position += direction * (strength * attractionForce) * dt;
+    
+    // direction = _tempVec1 / distance
+    _tempVec1.scale(1.0 / distance); 
+    square.position.addScaled(_tempVec1, strength * attractionForce * dt);
+
+    // Smoothly rotate the square to align with the Player's orientation.
+    final angleDiff = angle - square.angle;
+    final normalizedDiff = (angleDiff + math.pi) % (2 * math.pi) - math.pi;
+    square.angle += normalizedDiff * (strength * 5.0) * dt;
 
     // Add to attraction targets for visual effect.
     _activeAttractionTargets.add(AttractionTarget(
@@ -445,6 +471,9 @@ class Player extends RectangleComponent
   }
 
   Vector2 _cellToLocal((int, int) cell) {
-    return Vector2(cell.$1 * cellSize + cellSize / 2, cell.$2 * cellSize + cellSize / 2);
+    return _cellLocalPositionCache.putIfAbsent(
+      cell,
+      () => Vector2(cell.$1 * cellSize + cellSize / 2, cell.$2 * cellSize + cellSize / 2),
+    );
   }
 }

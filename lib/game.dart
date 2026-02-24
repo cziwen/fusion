@@ -117,7 +117,8 @@ class FusionGame extends FlameGame with HasKeyboardHandlerComponents, HasCollisi
       // Skip if too close to starting point
       if (pos.length < minSpawnRadius) continue;
 
-      final square = CollectableSquare(position: pos);
+      final square = CollectableSquare(position: pos)
+        ..angle = random.nextDouble() * pi * 2;
       world.add(square);
       squares.add(square);
     }
