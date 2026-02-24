@@ -10,10 +10,10 @@ import 'mixins/magnetic_effect_mixin.dart';
 class Player extends RectangleComponent
     with HasGameReference<FusionGame>, CollisionCallbacks, MagneticEffectMixin {
   static const double cellSize = 20.0;
-  double attractionRadius = 150.0;
-  double attractionForce = 500.0;
-  double candidateRefreshInterval = 0.2;
-  int magnetBatchSize = 24;
+  double attractionRadius = 200.0;
+  double attractionForce = 600.0;
+  double candidateRefreshInterval = 0.15;
+  int magnetBatchSize = 48;
   bool enableVisibleCandidateFilter = true;
   double visibleCandidateMargin = 100.0;
   static const double lockTimeoutSeconds = 1.2;
@@ -126,35 +126,51 @@ class Player extends RectangleComponent
 
   void attachSquare(CollectableSquare square) {
     if (square.isAttached || square.magnetState == MagnetState.attaching) return;
-    square.magnetState = MagnetState.attaching;
-
+    
+    // 1. 预解析目标格子
     final targetCell = _resolveOrLockTargetCell(
       square,
       forceRelock: true,
       worldPos: square.absolutePosition,
     );
+    
     if (targetCell == null || !_isAttachCellValid(targetCell, requester: square)) {
       square.magnetState = MagnetState.idle;
       square.attachRequestedThisFrame = false;
       return;
     }
+
+    // 2. 更新逻辑状态
+    square.magnetState = MagnetState.attaching;
+    _occupiedCells.add(targetCell);
+    _attachedSquares[targetCell] = square;
+    square.isAttached = true;
+
+    // 3. 立即触发消除和连通性检查
+    _checkMatches();
+    _checkConnectivity();
+
+    // 4. 检查方块是否仍然属于 Player 集群
+    if (!_attachedSquares.containsValue(square)) {
+      // 方块已被消除或脱离，释放预约并重置状态
+      _releaseReservation(square);
+      square.clearMagnetLock();
+      square.attachRequestedThisFrame = false;
+      return;
+    }
+
+    // 5. 如果仍然存在，执行视觉挂载
     final finalLocalPos = _cellToLocal(targetCell);
-    // Calculate the target world position to maintain visual continuity during the transition frame.
-    // Use absolutePositionOf to account for Player's current rotation and anchor.
     final targetWorldPos = absolutePositionOf(finalLocalPos);
 
     _releaseReservation(square);
-    square.isAttached = true;
-    square.magnetState = MagnetState.attached;
     square.attachRequestedThisFrame = false;
+    square.magnetState = MagnetState.attached;
 
-    // Temporarily set the world position so it doesn't jump during the remainder of this frame
-    // while it is still technically a child of the World or in transition.
+    // 保持世界坐标一致直到下一次渲染
     square.position = targetWorldPos;
-    // Queue the local position and angle for when it mounts to the Player.
     square.pendingLocalPosition = finalLocalPos;
     
-    // Snapping to the nearest local 90-degree increment.
     final localAngle = square.angle - angle;
     final snappedLocalAngle = (localAngle / (math.pi / 2)).round() * (math.pi / 2);
     square.pendingLocalAngle = snappedLocalAngle;
@@ -162,20 +178,15 @@ class Player extends RectangleComponent
     square.removeFromParent();
     add(square);
 
-    _occupiedCells.add(targetCell);
-    _attachedSquares[targetCell] = square;
-
-    // Trigger impact pulse for each shared edge with an occupied cell.
+    // 6. 装饰性逻辑
     for (final neighbor in _neighbors(targetCell)) {
       if (_occupiedCells.contains(neighbor)) {
         final isVerticalConnection = neighbor.$1 == targetCell.$1;
         Vector2 pulseCenter;
         if (isVerticalConnection) {
-          // Top or Bottom
           final y = math.max(neighbor.$2, targetCell.$2);
           pulseCenter = Vector2((targetCell.$1 + 0.5) * cellSize, y * cellSize);
         } else {
-          // Left or Right
           final x = math.max(neighbor.$1, targetCell.$1);
           pulseCenter = Vector2(x * cellSize, (targetCell.$2 + 0.5) * cellSize);
         }
@@ -185,14 +196,8 @@ class Player extends RectangleComponent
 
     square.clearMagnetLock();
     _topologyVersion += 1;
-
-    // Notify game to stop tracking this square in chunks
     game.onSquareAttached(square);
     game.triggerCameraShake();
-
-    // 检查消除和连通性
-    _checkMatches();
-    _checkConnectivity();
   }
 
   (int, int)? _findNearestAttachCell(Vector2 worldPos, {CollectableSquare? requester}) {
@@ -525,13 +530,17 @@ class Player extends RectangleComponent
   void _checkMatches() {
     final toRemove = <(int, int)>{};
 
+    // Helper to check if a cell is occupied (either core or attached square)
+    bool isOccupied((int, int) cell) => _occupiedCells.contains(cell);
+
     // 1. Check Match 5 (Horizontal and Vertical)
-    for (final cell in _attachedSquares.keys) {
+    for (final cell in _occupiedCells) {
       // Horizontal
       var horizontalMatch = <(int, int)>{cell};
+      // Check forward
       for (int i = 1; i < 5; i++) {
         final nextCell = (cell.$1 + i, cell.$2);
-        if (_attachedSquares.containsKey(nextCell)) {
+        if (isOccupied(nextCell)) {
           horizontalMatch.add(nextCell);
         } else {
           break;
@@ -541,9 +550,10 @@ class Player extends RectangleComponent
 
       // Vertical
       var verticalMatch = <(int, int)>{cell};
+      // Check forward
       for (int i = 1; i < 5; i++) {
         final nextCell = (cell.$1, cell.$2 + i);
-        if (_attachedSquares.containsKey(nextCell)) {
+        if (isOccupied(nextCell)) {
           verticalMatch.add(nextCell);
         } else {
           break;
@@ -553,7 +563,6 @@ class Player extends RectangleComponent
     }
 
     // 2. Check Pyramid 6 (1-2-3 structure)
-    // 我们定义 8 种可能的楼梯状金字塔（4个旋转 * 2个镜像）
     final pyramidOffsets = [
       // Right-bottom staircase
       [(0,0), (1,0), (2,0), (0,1), (1,1), (0,2)],
@@ -567,13 +576,13 @@ class Player extends RectangleComponent
       [(0,0), (0,-1), (0,-2), (-1,0), (-1,-1), (-2,0)],
     ];
 
-    for (final cell in _attachedSquares.keys) {
+    for (final cell in _occupiedCells) {
       for (final offsets in pyramidOffsets) {
         bool match = true;
         final currentPyramid = <(int, int)>{};
         for (final offset in offsets) {
           final target = (cell.$1 + offset.$1, cell.$2 + offset.$2);
-          if (!_attachedSquares.containsKey(target)) {
+          if (!isOccupied(target)) {
             match = false;
             break;
           }
@@ -587,9 +596,17 @@ class Player extends RectangleComponent
 
     if (toRemove.isNotEmpty) {
       for (final cell in toRemove) {
+        // 核心方块 (0,0) 不可被消除
+        if (cell == (0, 0)) continue;
+        
         final square = _attachedSquares.remove(cell);
         _occupiedCells.remove(cell);
-        square?.removeFromParent();
+        
+        if (square != null) {
+          square.isAttached = false;
+          square.removeFromParent();
+          // 注意：消除的方块不调用 game.onSquareDetached，因为我们不希望它们重新变为游离方块
+        }
       }
       _topologyVersion++;
     }
@@ -624,14 +641,24 @@ class Player extends RectangleComponent
         final square = _attachedSquares.remove(cell);
         _occupiedCells.remove(cell);
         if (square != null) {
+          // 记录当前世界坐标和角度，脱离后保持位置
+          final worldPos = square.absolutePosition;
+          final worldAngle = square.absoluteAngle;
+
           // 将孤立方块释放回世界
           square.isAttached = false;
           square.magnetState = MagnetState.idle;
-          square.removeFromParent();
+          
+          if (square.parent != null) {
+            square.removeFromParent();
+          }
+          
+          // 设置回绝对坐标并添加到 game.world
+          square.position = worldPos;
+          square.angle = worldAngle;
+          
           game.world.add(square);
           game.onSquareDetached(square);
-          // 重新放回后，其位置需要转换为世界坐标
-          square.position = absolutePositionOf(_cellToLocal(cell));
         }
       }
       _topologyVersion++;

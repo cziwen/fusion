@@ -22,7 +22,7 @@ class FusionGame extends FlameGame with HasKeyboardHandlerComponents, HasCollisi
   double minZoom = 0.15;
   double maxZoom = 1.0;
   double zoomSpeed = 2.0;
-  double freeDriftSpeed = 18.0;
+  double freeDriftSpeed = 30.0;
   double spawnIntervalSeconds = 1.2;
   int spawnCountPerTick = 3;
 
@@ -205,8 +205,11 @@ class FusionGame extends FlameGame with HasKeyboardHandlerComponents, HasCollisi
   void _pruneFreeSquares() {
     _freeSquares.removeWhere((square) {
       if (square.isAttached) return true;
-      // Keep newly spawned squares that are pending mount; drop only detached stale references.
-      return !square.isMounted && square.parent == null;
+      // 如果方块还在组件树中（有 parent），就不算失效
+      if (square.parent != null) return false;
+      // 如果既没有 parent 也没有被 mount，且不是刚刚被创建的（这里简单通过 isMounted 判断）
+      // 则认为是失效的引用
+      return !square.isMounted;
     });
   }
 
