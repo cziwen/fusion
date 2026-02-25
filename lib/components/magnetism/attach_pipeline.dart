@@ -88,6 +88,8 @@ class AttachPipeline {
   /// Processes all staged attachments and existing grid state for matches and orphans.
   void flush({
     required void Function(CollectableSquare square) onDetachedToWorld,
+    void Function(List<Vector2> localPositions)? onMatch,
+    Vector2 Function((int, int) cell)? cellToLocal,
   }) {
     if (_pending.isEmpty && gridState.occupiedCells.length <= 1) {
       // Nothing to check if only core is present and no new attachments
@@ -100,7 +102,17 @@ class AttachPipeline {
     // 2. Find matches
     final matches = matchEngine.findMatches(snapshot);
     if (matches.isNotEmpty) {
+      final matchPositions = <Vector2>[];
       for (final cell in matches) {
+        if (cellToLocal != null) {
+          matchPositions.add(cellToLocal(cell));
+        } else {
+          final square = gridState.attachedAt(cell);
+          if (square != null) {
+            matchPositions.add(square.position);
+          }
+        }
+
         final removed = gridState.removeAttached(cell);
         if (removed != null) {
           removed.isAttached = false;
@@ -109,6 +121,11 @@ class AttachPipeline {
         }
         snapshot.remove(cell);
       }
+      
+      if (onMatch != null && matchPositions.isNotEmpty) {
+        onMatch(matchPositions);
+      }
+
       gridState.bumpTopology();
     }
 

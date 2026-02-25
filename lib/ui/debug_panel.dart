@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../game.dart';
 import '../components/mixins/magnetic_effect_mixin.dart';
+import '../components/magnetism/match_engine.dart';
 
 class DebugPanel extends StatefulWidget {
   final FusionGame game;
@@ -12,9 +13,9 @@ class DebugPanel extends StatefulWidget {
 
 class _DebugPanelState extends State<DebugPanel> {
   bool _isExpanded = false;
-  bool _isMagnetismExpanded = false;
   bool _isVisualExpanded = false;
   bool _isSpawnExpanded = false;
+  bool _isRulesExpanded = false;
   bool _isCameraExpanded = false;
 
   @override
@@ -50,128 +51,6 @@ class _DebugPanelState extends State<DebugPanel> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    InkWell(
-                      onTap: () {
-                        setState(() {
-                          _isMagnetismExpanded = !_isMagnetismExpanded;
-                        });
-                      },
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Magnetism Settings',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          Icon(
-                            _isMagnetismExpanded ? Icons.expand_less : Icons.expand_more,
-                            color: Colors.white70,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_isMagnetismExpanded) ...[
-                      const SizedBox(height: 16),
-                      _buildSlider(
-                        label: 'Radius: ${player.attractionRadius.toStringAsFixed(0)}',
-                        value: player.attractionRadius,
-                        min: 0,
-                        max: 500,
-                        onChanged: (val) {
-                          setState(() {
-                            player.attractionRadius = val;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSlider(
-                        label: 'Control Radius: ${player.controlRadius.toStringAsFixed(0)}',
-                        value: player.controlRadius,
-                        min: 20,
-                        max: 300,
-                        onChanged: (val) {
-                          setState(() {
-                            player.controlRadius = val;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSlider(
-                        label: 'Force: ${player.attractionForce.toStringAsFixed(0)}',
-                        value: player.attractionForce,
-                        min: 0,
-                        max: 2000,
-                        onChanged: (val) {
-                          setState(() {
-                            player.attractionForce = val;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSlider(
-                        label: 'Batch Size: ${player.magnetBatchSize}',
-                        value: player.magnetBatchSize.toDouble(),
-                        min: 1,
-                        max: 100,
-                        divisions: 99,
-                        onChanged: (val) {
-                          setState(() {
-                            player.magnetBatchSize = val.toInt();
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSlider(
-                        label: 'Refresh Intv: ${player.candidateRefreshInterval.toStringAsFixed(2)}s',
-                        value: player.candidateRefreshInterval,
-                        min: 0.01,
-                        max: 1.0,
-                        onChanged: (val) {
-                          setState(() {
-                            player.candidateRefreshInterval = val;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildCheckbox(
-                        label: 'Visible Filter',
-                        value: player.enableVisibleCandidateFilter,
-                        onChanged: (val) {
-                          setState(() {
-                            player.enableVisibleCandidateFilter = val ?? true;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSlider(
-                        label: 'Visible Margin: ${player.visibleCandidateMargin.toStringAsFixed(0)}',
-                        value: player.visibleCandidateMargin,
-                        min: 0,
-                        max: 300,
-                        onChanged: (val) {
-                          setState(() {
-                            player.visibleCandidateMargin = val;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _buildSlider(
-                        label: 'Free Drift: ${widget.game.freeDriftSpeed.toStringAsFixed(1)}',
-                        value: widget.game.freeDriftSpeed,
-                        min: 0,
-                        max: 100,
-                        onChanged: (val) {
-                          setState(() {
-                            widget.game.freeDriftSpeed = val;
-                          });
-                        },
-                      ),
-                    ],
-                    const Divider(color: Colors.white24, height: 24),
                     InkWell(
                       onTap: () {
                         setState(() {
@@ -304,6 +183,49 @@ class _DebugPanelState extends State<DebugPanel> {
                           });
                         },
                       ),
+                    ],
+                    const Divider(color: Colors.white24, height: 24),
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _isRulesExpanded = !_isRulesExpanded;
+                        });
+                      },
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Elimination Rules',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Icon(
+                            _isRulesExpanded ? Icons.expand_less : Icons.expand_more,
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_isRulesExpanded) ...[
+                      const SizedBox(height: 16),
+                      ...EliminationRule.values.map((rule) {
+                        return _buildCheckbox(
+                          label: rule.name,
+                          value: player.matchEngine.enabledRules.contains(rule),
+                          onChanged: (val) {
+                            setState(() {
+                              if (val == true) {
+                                player.matchEngine.enabledRules.add(rule);
+                              } else {
+                                player.matchEngine.enabledRules.remove(rule);
+                              }
+                            });
+                          },
+                        );
+                      }),
                     ],
                     const Divider(color: Colors.white24, height: 24),
                     InkWell(

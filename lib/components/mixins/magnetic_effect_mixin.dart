@@ -13,6 +13,7 @@ mixin MagneticEffectMixin on PositionComponent {
     ..style = PaintingStyle.stroke;
 
   final List<ImpactPulse> _pulses = [];
+  final List<MatchAbsorptionPulse> _absorptionEffects = [];
   double _totalTime = 0;
 
   /// Renders an attraction effect between [start] and [end] with [strength].
@@ -125,6 +126,12 @@ mixin MagneticEffectMixin on PositionComponent {
     _pulses.add(ImpactPulse(center: center, isVertical: isVertical, duration: duration));
   }
 
+  /// Adds a "Black Hole" absorption effect for a set of matched square [localPositions].
+  void addMatchAbsorptionEffect(List<Vector2> localPositions, {double duration = 0.6}) {
+    if (localPositions.isEmpty) return;
+    _absorptionEffects.add(MatchAbsorptionPulse(localPositions: localPositions, duration: duration));
+  }
+
   /// Updates all active pulses and internal animation time.
   void updatePulses(double dt) {
     _totalTime += dt;
@@ -132,10 +139,19 @@ mixin MagneticEffectMixin on PositionComponent {
       pulse.update(dt);
       return pulse.isFinished;
     });
+    _absorptionEffects.removeWhere((effect) {
+      effect.update(dt);
+      return effect.isFinished;
+    });
   }
 
-  /// Renders all active pulses.
+  /// Renders all active pulses and absorption effects.
   void renderPulses(Canvas canvas) {
+    _renderImpactPulses(canvas);
+    _renderMatchAbsorption(canvas);
+  }
+
+  void _renderImpactPulses(Canvas canvas) {
     for (final pulse in _pulses) {
       final progress = pulse.progress;
       final opacity = 1.0 - progress;
@@ -157,6 +173,49 @@ mixin MagneticEffectMixin on PositionComponent {
           Offset(pulse.center.x - halfLength, pulse.center.y),
           Offset(pulse.center.x + halfLength, pulse.center.y),
           _linePaint,
+        );
+      }
+    }
+  }
+
+  void _renderMatchAbsorption(Canvas canvas) {
+    for (final effect in _absorptionEffects) {
+      final progress = effect.progress;
+      final center = effect.centroid;
+
+      // 1. Central "Implosion" Pulse (Black Hole)
+      final pulseProgress = (progress * 1.5).clamp(0.0, 1.0);
+      final pulseOpacity = 1.0 - pulseProgress;
+      final pulseRadius = 10.0 + (pulseProgress * 30.0);
+      
+      final pulsePaint = Paint()
+        ..color = Colors.white.withOpacity(pulseOpacity * 0.8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0 * (1.0 - pulseProgress);
+      
+      canvas.drawCircle(center.toOffset(), pulseRadius, pulsePaint);
+
+      // 2. Shrinking ghost squares flying towards center
+      for (final startPos in effect.localPositions) {
+        // Linear interpolation towards center
+        final currentPos = Vector2.copy(startPos)..lerp(center, progress);
+        
+        // Shrink from 20 to 0
+        final size = 20.0 * (1.0 - progress);
+        final halfSize = size / 2;
+        
+        final ghostPaint = Paint()
+          ..color = Colors.white.withOpacity((1.0 - progress) * 0.6)
+          ..style = PaintingStyle.fill;
+        
+        canvas.drawRect(
+          Rect.fromLTWH(
+            currentPos.x - halfSize,
+            currentPos.y - halfSize,
+            size,
+            size,
+          ),
+          ghostPaint,
         );
       }
     }
@@ -186,6 +245,33 @@ class ImpactPulse {
     required this.isVertical,
     this.duration = 0.4,
   });
+
+  void update(double dt) {
+    _elapsed += dt;
+  }
+
+  double get progress => (_elapsed / duration).clamp(0.0, 1.0);
+  bool get isFinished => _elapsed >= duration;
+}
+
+class MatchAbsorptionPulse {
+  final List<Vector2> localPositions;
+  final double duration;
+  late final Vector2 centroid;
+  double _elapsed = 0;
+
+  MatchAbsorptionPulse({
+    required this.localPositions,
+    this.duration = 0.6,
+  }) {
+    centroid = Vector2.zero();
+    if (localPositions.isNotEmpty) {
+      for (final pos in localPositions) {
+        centroid.add(pos);
+      }
+      centroid.scale(1.0 / localPositions.length);
+    }
+  }
 
   void update(double dt) {
     _elapsed += dt;

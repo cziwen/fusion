@@ -30,19 +30,25 @@ class MagnetMotionSystem {
     required double dt,
     required Vector2 tempDirection,
   }) {
-    tempDirection
-      ..setFrom(targetWorld)
-      ..sub(square.absolutePosition);
-    final distanceSquared = tempDirection.length2;
-    final maxDistanceSquared = attractionRadius * attractionRadius;
-    if (distanceSquared > maxDistanceSquared) {
+    // Calculate distance to player core for range check and strength
+    final distToPlayer = square.absolutePosition.distanceTo(playerWorldPosition);
+    final maxDistance = attractionRadius;
+    
+    if (distToPlayer > maxDistance) {
       return const MagnetMotionResult(
         outOfRange: true,
         shouldAttach: false,
         strength: 0,
       );
     }
-    if (distanceSquared == 0) {
+
+    // Direction vector towards the specific target slot
+    tempDirection
+      ..setFrom(targetWorld)
+      ..sub(square.absolutePosition);
+    final distanceToTargetSquared = tempDirection.length2;
+    
+    if (distanceToTargetSquared == 0) {
       return MagnetMotionResult(
         outOfRange: false,
         shouldAttach: attachRequestedThisFrame,
@@ -50,35 +56,43 @@ class MagnetMotionSystem {
       );
     }
 
-    final distance = math.sqrt(distanceSquared);
-    final strength = 1.0 - (distance / attractionRadius);
+    // Strength is now based on distance to player core
+    final strength = 1.0 - (distToPlayer / attractionRadius);
 
-    if (distance <= controlRadius) {
-      final currentAngle = math.atan2(
-        square.absolutePosition.y - playerWorldPosition.y,
-        square.absolutePosition.x - playerWorldPosition.x,
+    // Use a velocity-based approach for smoother, more organic movement.
+    // Instead of forcing position, we calculate a desired velocity and apply it.
+    final velocity = Vector2.zero();
+    final baseFactor = attractionForce / 100.0; // Scale user's force to a manageable factor
+
+    if (distToPlayer <= controlRadius) {
+      // Orbital Alignment: Guide the square towards the ray of its target slot
+      final targetAngle = math.atan2(
+        targetWorld.y - playerWorldPosition.y,
+        targetWorld.x - playerWorldPosition.x,
       );
-      final relAngle = currentAngle - playerWorldAngle;
-      final targetRelAngle = (relAngle / (math.pi / 2)).round() * (math.pi / 2);
-      final targetAngle = playerWorldAngle + targetRelAngle;
-      final newPos = playerWorldPosition +
-          Vector2(math.cos(targetAngle), math.sin(targetAngle)) * distance;
-      square.position.lerp(newPos, 10.0 * dt);
+      final orbitalPoint = playerWorldPosition +
+          Vector2(math.cos(targetAngle), math.sin(targetAngle)) * distToPlayer;
+      
+      final orbitalDiff = orbitalPoint - square.absolutePosition;
+      // Orbital force is stronger to ensure it reaches the correct "lane"
+      velocity.addScaled(orbitalDiff, baseFactor * 1.5 * strength);
     }
 
-    tempDirection.scale(1.0 / distance);
-    square.position.addScaled(tempDirection, strength * attractionForce * dt);
+    // Radial Attraction: Pull the square towards the actual target center
+    final radialDiff = targetWorld - square.absolutePosition;
+    velocity.addScaled(radialDiff, baseFactor * 1.0 * strength);
 
-    final relAngle = square.angle - playerWorldAngle;
-    final targetRelAngle = (relAngle / (math.pi / 2)).round() * (math.pi / 2);
-    final targetWorldAngle = playerWorldAngle + targetRelAngle;
-    final angleDiff = targetWorldAngle - square.angle;
+    // Apply the combined movement
+    square.position.addScaled(velocity, dt);
+
+    // Smoothly align square rotation with player rotation
+    final angleDiff = playerWorldAngle - square.angle;
     final normalizedDiff = (angleDiff + math.pi) % (2 * math.pi) - math.pi;
     square.angle += normalizedDiff * (strength * 5.0) * dt;
 
     return MagnetMotionResult(
       outOfRange: false,
-      shouldAttach: attachRequestedThisFrame || distanceSquared <= snapDistance * snapDistance,
+      shouldAttach: attachRequestedThisFrame || distanceToTargetSquared <= snapDistance * snapDistance,
       strength: strength,
     );
   }

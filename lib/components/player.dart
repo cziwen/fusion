@@ -12,12 +12,13 @@ import 'magnetism/magnet_motion_system.dart';
 import 'magnetism/magnet_targeting_service.dart';
 import 'magnetism/match_engine.dart';
 import 'mixins/magnetic_effect_mixin.dart';
+import 'mixins/core_effect_mixin.dart';
 
 class Player extends RectangleComponent
-    with HasGameReference<FusionGame>, CollisionCallbacks, MagneticEffectMixin {
+    with HasGameReference<FusionGame>, CollisionCallbacks, MagneticEffectMixin, CoreEffectMixin {
   static const double cellSize = 20.0;
   double attractionRadius = 200.0;
-  double attractionForce = 600.0;
+  double attractionForce = 450.0;
   double candidateRefreshInterval = 0.0; // 禁用刷新间隔，每帧刷新
   int magnetBatchSize = 999; // 实际上在 _updateMagnetismBatch 中将全量处理
   bool enableVisibleCandidateFilter = false; // 禁用可见性过滤
@@ -29,6 +30,7 @@ class Player extends RectangleComponent
   final MagnetTargetingService _targetingService = MagnetTargetingService();
   final MagnetMotionSystem _motionSystem = const MagnetMotionSystem();
   late final AttachPipeline _attachPipeline;
+  MatchEngine get matchEngine => _attachPipeline.matchEngine;
   final List<CollectableSquare> _magnetCandidates = [];
   final Map<(int, int), Vector2> _cellLocalPositionCache = {};
   final Vector2 _tempVec1 = Vector2.zero();
@@ -72,6 +74,10 @@ class Player extends RectangleComponent
 
     _activeAttractionTargets.clear();
     updatePulses(dt);
+    updateCoreEffects(dt);
+
+    // 应用核心方块的呼吸特效（透明度微调）
+    paint.color = Colors.white.withValues(alpha: 0.8 + coreBreathingValue * 0.2);
 
     // 同步玩家角度，使其在屏幕上保持正向
     angle = game.worldRotation;
@@ -85,13 +91,19 @@ class Player extends RectangleComponent
         game.world.add(target);
         game.onSquareDetached(target);
       },
+      onMatch: (positions) {
+        addMatchAbsorptionEffect(positions);
+      },
+      cellToLocal: _cellToLocal,
     );
   }
 
   @override
   void render(Canvas canvas) {
     _renderControlZone(canvas);
+    renderCoreBackgroundEffects(canvas);
     super.render(canvas);
+    renderCoreForegroundEffects(canvas);
     if (showAttractionLines) {
       for (final target in _activeAttractionTargets) {
         drawAttractionEffect(
